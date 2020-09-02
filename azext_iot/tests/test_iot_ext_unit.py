@@ -360,12 +360,32 @@ def generate_device_show(**kvp):
     payload = {
         "authentication": {
             "symmetricKey": {"primaryKey": "123", "secondaryKey": "321"},
-            "type": "sas",
+            "type": "sas"
         },
         "etag": "abcd",
         "capabilities": {"iotEdge": True},
         "deviceId": device_id,
         "status": "disabled",
+    }
+    for k in kvp:
+        if payload.get(k):
+            payload[k] = kvp[k]
+    return payload
+
+
+def generate_device_show_custom(**kvp):
+    payload = {
+        "authentication": {
+            "symmetricKey": {"primaryKey": "123", "secondaryKey": "321"},
+            "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+            "type": "sas",
+            "auth_method": "shared_private_key"
+        },
+        "etag": "abcd",
+        "capabilities": {"iotEdge": True},
+        "deviceId": device_id,
+        "status": "disabled",
+        "statusReason": "status_reason",
     }
     for k in kvp:
         if payload.get(k):
@@ -384,6 +404,8 @@ class TestDeviceUpdate:
     @pytest.mark.parametrize(
         "req",
         [
+            (generate_device_show(capabilities={"iotEdge": False})),
+            (generate_device_show(status="enabled")),
             (
                 generate_device_show(
                     authentication={
@@ -430,6 +452,145 @@ class TestDeviceUpdate:
 
         headers = args[0][0].headers
         assert headers["If-Match"] == '"{}"'.format(req["etag"])
+
+    @pytest.mark.parametrize(
+        "req, out",
+        [
+            (generate_device_show_custom(capabilities={"iotEdge": False}), generate_device_show_custom(capabilities={"iotEdge": True})),
+            (generate_device_show_custom(status="disabled"), (generate_device_show_custom(status="enabled"))),
+            (generate_device_show_custom(), (generate_device_show_custom(statusReason="StatusUpdated"))),
+            (
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "", "secondaryKey": ""},
+                        "type": "sas",
+                        "auth_method": "shared_private_key",
+                        "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+                    }
+                ),
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "primarykeyUpdated", "secondaryKey": "primarykeyUpdated"},
+                        "type": "sas",
+                        "auth_method": "shared_private_key",
+                        "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+                    }
+                )
+            ),
+            (
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "", "secondaryKey": ""},
+                        "type": "selfSigned",
+                        "auth_method": "x509_thumbprint",
+                        "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+                    }
+                ),
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "primarykeyUpdated", "secondaryKey": "primarykeyUpdated"},
+                        "type": "selfSigned",
+                        "auth_method": "x509_thumbprint",
+                        "x509Thumbprint": {"primaryThumbprint": "1234", "secondaryThumbprint": "3214"},
+                    }
+                )
+            ),
+            (
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "", "secondaryKey": ""},
+                        "type": "certificateAuthority",
+                        "auth_method": "sas",
+                        "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+                    }
+                ),
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "primarykeyUpdated", "secondaryKey": "primarykeyUpdated"},
+                        "type": "certificateAuthority",
+                        "auth_method": "x509_ca",
+                        "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+                    }
+                )
+            ),
+        ]
+    )
+    def test_iot_device_custom(self, fixture_cmd, serviceclient, req, out):
+        instance = subject.update_iot_device_custom(
+            req,
+            out["capabilities"]["iotEdge"],
+            out["status"], out["statusReason"],
+            out["authentication"]["auth_method"],
+            out['authentication']['x509Thumbprint']['primaryThumbprint'],
+            out['authentication']['x509Thumbprint']['secondaryThumbprint'],
+            out['authentication']['symmetricKey']['primaryKey'],
+            out['authentication']['symmetricKey']['secondaryKey']
+        )
+        assert instance["capabilities"]["iotEdge"] == out["capabilities"]["iotEdge"]
+        assert instance["status"] == out["status"]
+        assert instance["statusReason"] == out["statusReason"]
+
+        if out["authentication"]["auth_method"] == "shared_private_key":
+            assert instance['authentication']['symmetricKey']['primaryKey'] == out['authentication']['symmetricKey']['primaryKey']
+            assert instance['authentication']['symmetricKey']['secondaryKey'] == out['authentication']['symmetricKey']['secondaryKey']
+
+        if out["authentication"]["auth_method"] == "x509_thumbprint":
+            assert instance['authentication']['x509Thumbprint']['primaryThumbprint'] == out['authentication']['x509Thumbprint']['primaryThumbprint']
+            assert instance['authentication']['x509Thumbprint']['secondaryThumbprint'] == out['authentication']['x509Thumbprint']['secondaryThumbprint']
+
+        if out["authentication"]["auth_method"] == "x509_ca":
+            assert instance['authentication']['type'] == out['authentication']['type']
+
+    @pytest.mark.parametrize(
+        "req, exp",
+        [
+            (
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "123", "secondaryKey": ""},
+                        "type": "sas",
+                        "auth_method": "shared_private_key",
+                        "x509Thumbprint": {"primaryThumbprint": "123", "secondaryThumbprint": "321"},
+                    }
+                ),
+                CLIError
+            ),
+            (
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "", "secondaryKey": ""},
+                        "type": "selfSigned",
+                        "auth_method": "x509_thumbprint",
+                        "x509Thumbprint": {"primaryThumbprint": "", "secondaryThumbprint": ""},
+                    }
+                ),
+                CLIError
+            ),
+            (
+                generate_device_show_custom(
+                    authentication={
+                        "symmetricKey": {"primaryKey": "", "secondaryKey": ""},
+                        "type": "selfSigned",
+                        "auth_method": "x509_thumbprinttest",
+                        "x509Thumbprint": {"primaryThumbprint": "", "secondaryThumbprint": ""},
+                    }
+                ),
+                ValueError
+            ),
+        ]
+    )
+    def test_iot_device_custom_invalid_args(self, serviceclient, req, exp):
+        with pytest.raises(exp):
+            subject.update_iot_device_custom(
+                req,
+                req["capabilities"]["iotEdge"],
+                req["status"], req["statusReason"],
+                req["authentication"]["auth_method"],
+                req['authentication']['x509Thumbprint']['primaryThumbprint'],
+                req['authentication']['x509Thumbprint']['secondaryThumbprint'],
+                req['authentication']['symmetricKey']['primaryKey'],
+                req['authentication']['symmetricKey']['secondaryKey']
+            )
 
     @pytest.mark.parametrize(
         "req, exp",
